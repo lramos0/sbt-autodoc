@@ -5,7 +5,7 @@ You would rather ship **ad-service** than spend your afternoon in **ad-service-d
 It:
 
 1. Loads configuration from **ad-service-documentation** (or a local checkout you point at).
-2. Runs `git diff --name-status` and keeps only paths under the **current sbt project** `baseDirectory`. By default it diffs **all commits on your current branch** since the merge-base with `origin/main` (`origin/main...HEAD`); you can switch to uncommitted-only or override the base ref (see settings below).
+2. Runs `git diff --name-status` and, by default (**`autoDocPerSubproject := false`**), keeps paths under the **build root** `baseDirectory` (one repo, one `autodoc.md`). Set **`autoDocPerSubproject := true`** to scope each subproject separately and write **`target/autodoc/autodoc.md`** per module. By default it diffs **all commits on your current branch** since the merge-base with `origin/main` (`origin/main...HEAD`); you can switch to uncommitted-only or override the base ref (see settings below).
 3. Resolves the **service** (e.g. `ad-service`) from `pathPrefixes` in the config, or from `autoDocServiceId`.
 4. Renders a Markdown summary using a template from the documentation repo (or the bundled default).
 
@@ -34,12 +34,10 @@ autoDocDocumentationConfigPath := "autodoc/config.json",
 ### 3. Run the task
 
 ```bash
-sbt adService/autoDoc
+sbt autoDoc
 ```
 
-(Use your subproject’s id—often `lazy val adService = project.in(file("ad-service"))`.)
-
-Output defaults to `target/autodoc/autodoc.md`.
+By default this runs on the **build root** only and writes **`target/autodoc/autodoc.md`** under that root (nested projects log a skip). For a **multi-folder service** in one git repo (e.g. `ad-service/`), set **`autoDocPerSubproject := true`** and run e.g. `sbt adService/autoDoc` so each module gets its own scoped diff and output.
 
 ### Useful settings
 
@@ -50,9 +48,11 @@ Output defaults to `target/autodoc/autodoc.md`.
 | `autoDocGitBranchBase` | Left side of the three-dot diff when scope is `branch` (default `origin/main`). Use `origin/master` if your default branch is `master`. |
 | `autoDocGitDiffSpec` | If set, overrides scope and base; passed as the rev expression to `git diff --name-status` (e.g. `Some("origin/develop...HEAD")`). |
 | `autoDocServiceId` | Force a service id from the JSON config when path-based inference is wrong. |
-| `autoDocOutputFile` | Where to write the Markdown file. |
+| `autoDocPerSubproject` | **`false`** (default): one output at **build root** `target/autodoc/`, git scope = whole repo; **`autoDoc` / `autoDocElaborate` no-op** on nested projects. **`true`**: legacy per-module outputs and scoped diffs. |
+| `autoDocOutputFile` | Where to write the Markdown file (defaults under build root or subproject `target/` per `autoDocPerSubproject`). |
 | `autoDocElaborationProvider` | `none` (default), `claude-code`, `cursor-cli`, etc. Requires plugin **≥ 0.3.0-SNAPSHOT** (or a build that includes elaboration). |
 | `autoDocElaborationMode` | `handoff` (write prompt only) or `execute` (run provider CLI if configured). Task: `autoDocElaborate`. |
+| `autoDocElaborationMermaidDiagrams` | If the documentation repo contains **`.mmd`** files: **`ask`** (default) uses sbt’s **InteractionService** (yes/no) to add diagram-update instructions; **`include`** always adds them; **`skip`** never does. The prompt tells the agent to **edit those `.mmd` paths in place**, not to paste Mermaid into the elaborated markdown. For CI / no TTY, prefer **`include`** or **`skip`** (batch mode may treat **ask** as “no”). |
 
 ## ad-service-documentation JSON (`version`: 1)
 
@@ -83,15 +83,15 @@ Single git repo for one service with several sbt modules (`core/`, `service/`, �
   "version": 1,
   "services": [
     {
-      "id": "edge-ctrl",
-      "title": "Edge Ctrl",
+      "id": "ad-service",
+      "title": "Ad Service",
       "pathPrefixes": ["."]
     }
   ]
 }
 ```
 
-- **pathPrefixes**: Used to infer which service an sbt project belongs to (longest matching prefix wins). Paths are POSIX-style, relative to the git repository root. Use **`"."`** (or `"*"`) when the git repo is a single service with multiple sbt modules (e.g. edge-ctrl with `core/`, `service/`, …) so every module maps to the same service.
+- **pathPrefixes**: Used to infer which service an sbt project belongs to (longest matching prefix wins). Paths are POSIX-style, relative to the git repository root. Use **`"."`** (or `"*"`) when the git repo is a single service with multiple sbt modules (e.g. ad-service with `core/`, `service/`, …) so every module maps to the same service.
 - **templates**: Resolved under the documentation repo root, e.g. `templates/default.md.tpl`. Placeholders: `{{serviceId}}`, `{{serviceTitle}}`, `{{projectPath}}`, `{{generatedAt}}`, `{{changeList}}`.
 
 ### Troubleshooting
@@ -102,11 +102,11 @@ That almost always means the file **does not exist** at `autoDocDocumentationCon
 
 **Many parallel `git fetch` lines when running `autoDoc` on all projects**
 
-The documentation repo is cached under **`(LocalRootProject base)/target/autodoc/documentation-repo`** (the build root, not each module’s `target/`). Per-subproject output still goes to each module’s `target/autodoc/autodoc.md`.
+The documentation repo is cached under **`(LocalRootProject base)/target/autodoc/documentation-repo`**. Git access is serialized per cache dir. With the default **`autoDocPerSubproject := false`**, only the root project writes **`autodoc.md`**; `all autoDoc` mostly skips nested projects. Use **`autoDocPerSubproject := true`** only when you need one markdown per sbt module.
 
 **`no service mapping for project path 'core'`**
 
-Your git root is probably the service repo (paths like `core`, `service`). Either add **`pathPrefixes: ["."]`** on the edge-ctrl service in the documentation config, list every module (`core/`, `service/`, …), or set **`autoDocServiceId`** in sbt.
+Your git root is probably the service repo (paths like `core`, `service`). Either add **`pathPrefixes: ["."]`** on the ad-service service in the documentation config, list every module (`core/`, `service/`, …), or set **`autoDocServiceId`** in sbt.
 
 **`not found: value autoDocGitDiffScope` (or other keys, e.g. `autoDocElaborationProvider`)**
 

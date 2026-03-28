@@ -6,7 +6,7 @@ object ConfigResolver {
   /**
     * Pick the service whose path prefix best matches the project path (longest prefix wins).
     * A prefix of `.` or `*` (or empty) means "this service owns the whole repository" — used when the git
-    * root is one service (e.g. edge-ctrl with sbt modules `core`, `service`, …).
+    * root is one service (e.g. ad-service with sbt modules `core`, `service`, …).
     */
   def resolveService(config: AutoDocConfig, projectPathFromRepoRoot: String): Option[ServiceConfig] = {
     val dir = normalizeDir(projectPathFromRepoRoot)

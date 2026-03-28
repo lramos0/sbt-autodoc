@@ -1,6 +1,6 @@
 package autodoc.task
 
-import autodoc.config.{ConfigLoader, DocumentationRepo}
+import autodoc.config.{ConfigLoader, DocumentationRootResolver}
 import autodoc.detect.{ProjectContextDetector, ProjectScope}
 import autodoc.git.GitCliClient
 import autodoc.model.DocContext
@@ -27,7 +27,7 @@ object AutoDocRunner {
   ): Either[String, File] = {
     val git = new GitCliClient()
     for {
-      docRoot <- resolveDocumentationRoot(
+      docRoot <- DocumentationRootResolver.resolve(
         log,
         documentationRepoUrl,
         localDocumentationRoot,
@@ -54,26 +54,6 @@ object AutoDocRunner {
       _ = FileUtils.writeUtf8(outputFile, md)
     } yield outputFile
   }
-
-  private def resolveDocumentationRoot(
-      log: Logger,
-      url: Option[String],
-      local: Option[File],
-      ref: String,
-      cacheDir: File,
-  ): Either[String, File] =
-    (local, url) match {
-      case (Some(root), _) =>
-        if (root.isDirectory) Right(root)
-        else Left(s"sbt-autodoc: autoDocLocalDocumentationRoot is not a directory: ${root.getAbsolutePath}")
-      case (None, Some(u)) =>
-        DocumentationRepo.ensureCheckout(u, ref, cacheDir, log)
-      case (None, None) =>
-        Left(
-          "sbt-autodoc: set autoDocDocumentationRepoUrl (git URL for ad-service-documentation) " +
-            "or autoDocLocalDocumentationRoot (local checkout path)",
-        )
-    }
 
   private def relativePathFromRepoRoot(gitRoot: File, projectBase: File): String = {
     val root = gitRoot.getCanonicalFile.toPath

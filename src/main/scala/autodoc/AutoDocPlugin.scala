@@ -20,6 +20,7 @@ object AutoDocPlugin extends AutoPlugin {
     val autoDocGitBranchBase = AutoDocKeys.autoDocGitBranchBase
     val autoDocGitDiffSpec = AutoDocKeys.autoDocGitDiffSpec
     val autoDocServiceId = AutoDocKeys.autoDocServiceId
+    val autoDocPerSubproject = AutoDocKeys.autoDocPerSubproject
     val autoDocOutputFile = AutoDocKeys.autoDocOutputFile
     val autoDocElaborate = AutoDocKeys.autoDocElaborate
     val autoDocElaborationProvider = AutoDocKeys.autoDocElaborationProvider
@@ -34,6 +35,7 @@ object AutoDocPlugin extends AutoPlugin {
     val autoDocElaborationClaudeCodeArgs = AutoDocKeys.autoDocElaborationClaudeCodeArgs
     val autoDocElaborationCursorCliExecutable = AutoDocKeys.autoDocElaborationCursorCliExecutable
     val autoDocElaborationCursorCliArgs = AutoDocKeys.autoDocElaborationCursorCliArgs
+    val autoDocElaborationMermaidDiagrams = AutoDocKeys.autoDocElaborationMermaidDiagrams
   }
 
   override lazy val projectSettings: Seq[Setting[_]] = AutoDocTasks.settings
