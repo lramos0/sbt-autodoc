@@ -45,7 +45,14 @@ trait AutoDocKeys {
   /** Pin service id from config instead of inferring from project path. */
   val autoDocServiceId = settingKey[Option[String]]("Optional service id override (must exist in config)")
 
-  /** Output markdown file (defaults to target/autodoc/autodoc.md). */
+  /**
+    * If false (default), treat the git checkout as a single logical project: one `autodoc.md` under the build root
+    * `target/`, git diff scoped to [[LocalRootProject]] `baseDirectory`, and `autoDoc` / `autoDocElaborate` no-op on
+    * nested sbt projects. If true, each subproject gets its own output and scoped diff (legacy behavior).
+    */
+  val autoDocPerSubproject = settingKey[Boolean]("Per-subproject autodoc output and git scope (default: false)")
+
+  /** Output markdown file (defaults under build root or subproject `target/` depending on [[autoDocPerSubproject]]). */
   val autoDocOutputFile = settingKey[File]("Generated markdown output path")
 
   /** Elaborate generated docs with an AI provider (runs after [[autoDoc]]). */
@@ -91,6 +98,12 @@ trait AutoDocKeys {
 
   /** Extra args after the prompt for default `cursor-cli` invocation (e.g. pass model via Seq("--model", "gpt-5.2")). */
   val autoDocElaborationCursorCliArgs = settingKey[Seq[String]]("Extra Cursor CLI args for default cursor-cli execute")
+
+  /**
+    * When the documentation repo contains `.mmd` files: `ask` uses sbt InteractionService (yes/no), `include` always
+    * adds diagram-update instructions to the elaboration prompt, `skip` never does.
+    */
+  val autoDocElaborationMermaidDiagrams = settingKey[String]("ask | include | skip — elaboration prompt and .mmd files")
 }
 
 object AutoDocKeys extends AutoDocKeys

@@ -4,21 +4,38 @@ import autodoc.util.LogUtils
 import sbt.Logger
 
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import scala.sys.process._
 
-/** Shallow-clone or update ad-service-documentation into a cache directory. */
+/**
+  * Shallow-clone or update ad-service-documentation into a cache directory.
+  *
+  * Git operations are [[synchronized]] per canonical cache path so parallel sbt projects (e.g. `all autoDoc`)
+  * do not corrupt the same clone (`shallow.lock`, "shallow file has changed since we read it").
+  */
 object DocumentationRepo {
+
+  private val cacheLocks = new ConcurrentHashMap[String, AnyRef]()
+
+  private def lockFor(cacheDir: File): AnyRef = {
+    val key =
+      try cacheDir.getCanonicalPath
+      catch { case _: Exception => cacheDir.getAbsolutePath }
+    cacheLocks.computeIfAbsent(key, _ => new AnyRef)
+  }
+
   def ensureCheckout(
       repoUrl: String,
       ref: String,
       cacheDir: File,
       log: Logger,
-  ): Either[String, File] = {
-    if (!cacheDir.exists()) cacheDir.mkdirs()
-    val marker = new File(cacheDir, ".git")
-    if (!marker.exists) cloneShallow(repoUrl, ref, cacheDir, log)
-    else fetchAndCheckout(cacheDir, ref, log).map(_ => cacheDir)
-  }
+  ): Either[String, File] =
+    lockFor(cacheDir).synchronized {
+      if (!cacheDir.exists()) cacheDir.mkdirs()
+      val marker = new File(cacheDir, ".git")
+      if (!marker.exists) cloneShallow(repoUrl, ref, cacheDir, log)
+      else fetchAndCheckout(cacheDir, ref, log).map(_ => cacheDir)
+    }
 
   private def cloneShallow(url: String, ref: String, dest: File, log: Logger): Either[String, File] = {
     LogUtils.info(log, s"sbt-autodoc: cloning documentation repo into ${dest.getAbsolutePath}")

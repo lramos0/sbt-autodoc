@@ -1,5 +1,6 @@
 package autodoc.task
 
+import autodoc.config.DocumentationRootResolver
 import autodoc.keys.AutoDocKeys
 import autodoc.render.MarkdownRenderer
 import autodoc.util.FileUtils
@@ -23,11 +24,27 @@ object AutoDocTasks {
     autoDocGitBranchBase := "origin/main",
     autoDocGitDiffSpec := None,
     autoDocServiceId := None,
-    autoDocOutputFile := target.value / "autodoc" / "autodoc.md",
+    autoDocPerSubproject := false,
+    autoDocOutputFile := {
+      val t =
+        if (autoDocPerSubproject.value) target.value
+        else (LocalRootProject / target).value
+      t / "autodoc" / "autodoc.md"
+    },
     autoDocElaborationProvider := "none",
     autoDocElaborationMode := "handoff",
-    autoDocElaborationPromptFile := target.value / "autodoc" / "elaboration-prompt.md",
-    autoDocElaborationOutputFile := target.value / "autodoc" / "autodoc-elaborated.md",
+    autoDocElaborationPromptFile := {
+      val t =
+        if (autoDocPerSubproject.value) target.value
+        else (LocalRootProject / target).value
+      t / "autodoc" / "elaboration-prompt.md"
+    },
+    autoDocElaborationOutputFile := {
+      val t =
+        if (autoDocPerSubproject.value) target.value
+        else (LocalRootProject / target).value
+      t / "autodoc" / "autodoc-elaborated.md"
+    },
     autoDocElaborationAudience := "engineering",
     autoDocElaborationTone := "concise",
     autoDocElaborationCustomPrompt := None,
@@ -36,45 +53,74 @@ object AutoDocTasks {
     autoDocElaborationClaudeCodeArgs := Seq.empty,
     autoDocElaborationCursorCliExecutable := "agent",
     autoDocElaborationCursorCliArgs := Seq.empty,
+    autoDocElaborationMermaidDiagrams := "ask",
     autoDoc := {
       val log = streams.value.log
       val out = autoDocOutputFile.value
-      val gitDiff =
-        autoDocGitDiffSpec.value.orElse {
-          if (autoDocGitDiffScope.value.equalsIgnoreCase("branch"))
-            Some(s"${autoDocGitBranchBase.value}...HEAD")
-          else None
-        }
-      AutoDocRunner
-        .run(
-          log = log,
-          baseDirectory = baseDirectory.value,
-          documentationRepoUrl = autoDocDocumentationRepoUrl.value,
-          localDocumentationRoot = autoDocLocalDocumentationRoot.value,
-          documentationRef = autoDocDocumentationRef.value,
-          documentationConfigRelativePath = autoDocDocumentationConfigPath.value,
-          documentationCacheDirectory = autoDocDocumentationCacheDirectory.value,
-          gitDiffSpec = gitDiff,
-          serviceIdOverride = autoDocServiceId.value,
-          outputFile = out,
-          loader = classOf[MarkdownRenderer].getClassLoader,
+      val per = autoDocPerSubproject.value
+      val rootBase = (LocalRootProject / baseDirectory).value.getCanonicalFile
+      val isRoot = baseDirectory.value.getCanonicalFile == rootBase
+      if (!per && !isRoot) {
+        log.info(
+          "sbt-autodoc: skipping autoDoc on nested project (single-repo mode). " +
+            "Run `autoDoc` on the root project, or set autoDocPerSubproject := true for per-module outputs.",
         )
-        .fold(
-          msg => sys.error(msg),
-          file => {
-            log.success(s"sbt-autodoc: wrote ${file.getAbsolutePath}")
-            file
-          },
-        )
+        out
+      } else {
+        val scopeBase =
+          if (per) baseDirectory.value
+          else (LocalRootProject / baseDirectory).value
+        val gitDiff =
+          autoDocGitDiffSpec.value.orElse {
+            if (autoDocGitDiffScope.value.equalsIgnoreCase("branch"))
+              Some(s"${autoDocGitBranchBase.value}...HEAD")
+            else None
+          }
+        AutoDocRunner
+          .run(
+            log = log,
+            baseDirectory = scopeBase,
+            documentationRepoUrl = autoDocDocumentationRepoUrl.value,
+            localDocumentationRoot = autoDocLocalDocumentationRoot.value,
+            documentationRef = autoDocDocumentationRef.value,
+            documentationConfigRelativePath = autoDocDocumentationConfigPath.value,
+            documentationCacheDirectory = autoDocDocumentationCacheDirectory.value,
+            gitDiffSpec = gitDiff,
+            serviceIdOverride = autoDocServiceId.value,
+            outputFile = out,
+            loader = classOf[MarkdownRenderer].getClassLoader,
+          )
+          .fold(
+            msg => sys.error(msg),
+            file => {
+              log.success(s"sbt-autodoc: wrote ${file.getAbsolutePath}")
+              file
+            },
+          )
+      }
     },
     autoDocElaborate := {
       val log = streams.value.log
+      val interaction = interactionService.value
+      val per = autoDocPerSubproject.value
+      val rootBase = (LocalRootProject / baseDirectory).value.getCanonicalFile
+      val isRoot = baseDirectory.value.getCanonicalFile == rootBase
       val _ = autoDoc.value
-      val provider = autoDocElaborationProvider.value.trim
-      if (provider.equalsIgnoreCase("none")) {
-        log.info("sbt-autodoc: autoDocElaborationProvider is none; skipping autoDocElaborate")
+      if (!per && !isRoot) {
+        log.info(
+          "sbt-autodoc: skipping autoDocElaborate on nested project (single-repo mode). " +
+            "Run on the root project, or set autoDocPerSubproject := true.",
+        )
         Seq.empty
       } else {
+        val elaborationWorkDir =
+          if (per) baseDirectory.value
+          else (LocalRootProject / baseDirectory).value
+        val provider = autoDocElaborationProvider.value.trim
+        if (provider.equalsIgnoreCase("none")) {
+          log.info("sbt-autodoc: autoDocElaborationProvider is none; skipping autoDocElaborate")
+          Seq.empty
+        } else {
         val mode = autoDocElaborationMode.value.trim.toLowerCase
         val input = autoDocOutputFile.value
         val promptFile = autoDocElaborationPromptFile.value
@@ -84,6 +130,37 @@ object AutoDocTasks {
         val custom = autoDocElaborationCustomPrompt.value
         val customBlock =
           custom.map(c => s"\n## Additional instructions\n$c\n").getOrElse("")
+        val diagramBlock = {
+          val docRoot = DocumentationRootResolver.resolve(
+            log,
+            autoDocDocumentationRepoUrl.value,
+            autoDocLocalDocumentationRoot.value,
+            autoDocDocumentationRef.value,
+            autoDocDocumentationCacheDirectory.value,
+          )
+          docRoot match {
+            case Left(msg) =>
+              log.debug(s"sbt-autodoc: documentation repo not resolved for .mmd scan: $msg")
+              ""
+            case Right(root) =>
+              val mmds = MermaidDiagramIndex.findMmdFiles(root)
+              if (mmds.isEmpty) ""
+              else if (
+                ElaborationDiagramPolicy.shouldInclude(
+                  autoDocElaborationMermaidDiagrams.value,
+                  mmds.size,
+                  log,
+                  interaction,
+                )
+              ) {
+                log.info(
+                  s"sbt-autodoc: adding Mermaid diagram hints (${mmds.size} .mmd file(s)) to elaboration prompt",
+                )
+                MermaidDiagramIndex.formatDiagramSection(mmds, root)
+              }
+              else ""
+          }
+        }
         val promptBody =
           s"""# Autodoc AI elaboration ($provider)
              |
@@ -95,7 +172,7 @@ object AutoDocTasks {
              |
              |- **Audience**: $audience
              |- **Tone**: $tone
-             |$customBlock
+             |$customBlock$diagramBlock
              |""".stripMargin
         val promptForDisk =
           if (provider.equalsIgnoreCase("claude-code"))
@@ -123,7 +200,7 @@ object AutoDocTasks {
                   FileUtils.ensureParentDir(outputFile)
                   val exit = ClaudeCodeElaboration.run(
                     log = log,
-                    workDir = baseDirectory.value,
+                    workDir = elaborationWorkDir,
                     executable = autoDocElaborationClaudeCodeExecutable.value,
                     promptText = promptForDisk,
                     extraArgs = autoDocElaborationClaudeCodeArgs.value,
@@ -136,7 +213,7 @@ object AutoDocTasks {
                   FileUtils.ensureParentDir(outputFile)
                   val exit = CursorCliElaboration.run(
                     log = log,
-                    workDir = baseDirectory.value,
+                    workDir = elaborationWorkDir,
                     executable = autoDocElaborationCursorCliExecutable.value,
                     promptText = promptForDisk,
                     extraArgs = autoDocElaborationCursorCliArgs.value,
@@ -155,6 +232,7 @@ object AutoDocTasks {
             Seq(promptFile)
           case other =>
             sys.error(s"autoDocElaborationMode must be handoff or execute, got: $other")
+        }
         }
       }
     },
